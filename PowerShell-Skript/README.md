@@ -4,6 +4,7 @@ https://www.notion.so/phd-technik-auer-guss/Installierte-Software-der-Rechner-au
 ---
 
 Das Skript sammelt den Computernamen, Benutzername, Uhrzeit und die installierten Programme eines Rechner und speichert diese Infos in einer .csv-Datei unter dem im Skript eingestellten Pfad.
+![image](https://github.com/user-attachments/assets/5cc6fb32-64be-4a44-ac09-4430b2e9710d)
 
 ---
 
@@ -18,7 +19,5 @@ Das Skript sammelt den Computernamen, Benutzername, Uhrzeit und die installierte
 
 1. neue GPO erstellen
 2. Unter **Benutzerkonfiguration > Richtlinien > Windows-Einstellungen > Skripts (Anmelden/Abmelden)**
-
-![image.png](https://prod-files-secure.s3.us-west-2.amazonaws.com/599e61c6-64fd-4308-9655-dde035f846d6/f52eb6a5-fa5b-46c8-90b6-67454fa49b0b/image.png)
-
+![image2](https://github.com/user-attachments/assets/53ea6716-eb00-46a5-bb19-d4fcae85d6f6)
 3. verlinke dort die .PS1-Datei, die ausgeführt werden soll
