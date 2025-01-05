@@ -6,7 +6,7 @@ $userName = $env:USERNAME
 $timeStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
 # Definiere den Pfad zur Ausgabedatei mit Zeitstempel
-$outputPath = "C:\Users\Andreas Koller\${computerName}_-_${userName}_$timeStamp.csv"
+$outputPath = "\\amb-filer\Alle\EDV-Dateien\${computerName}_-_${userName}_$timeStamp.csv"
 
 # Array mit Filtern für unerwünschte Software
 $excludeFilters = @(
