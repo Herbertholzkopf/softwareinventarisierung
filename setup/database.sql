@@ -1,3 +1,5 @@
+USE softwareinventar;
+
 CREATE TABLE computer (
     computer_id INT AUTO_INCREMENT PRIMARY KEY,
     computer_name VARCHAR(255) NOT NULL,
