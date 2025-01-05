@@ -153,36 +153,3 @@ systemctl restart nginx
 echo -e "${GREEN}Installation abgeschlossen!${NC}"
 echo -e "${RED}Korrigiere das gerade eingegebene Passwort des Datenbank-Benutzers mit dem Befehl: nano /var/www/softwareinventarisierung/config.php${NC}"
 echo -e "${RED}Korrigiere das gerade eingegebene Passwort des Datenbank-Benutzers mit dem Befehl: nano /var/www/softwareinventarisierung/scripts/csv-database/database-config.ini${NC}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Pakete für die Python Installation
-
-sudo apt update
-sudo apt install python3-mysql.connector python3-pandas
