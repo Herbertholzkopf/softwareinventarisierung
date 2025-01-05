@@ -37,6 +37,34 @@ Jetzt kommt Benutzer_2 und meldet sich auf PC_A an. Dieser bekommt die Version 3
 
 
 
+### Beschreibung des Python Skripts für die CSV to Database Funktionalität
+
+Die Zugangsdaten der Datenbank werden aus einer database-config.ini Datei geladen werden.
+
+Die CSV-Dateien haben das Format: {computerName}-${userName}_$timeStamp.csv
+
+Das Skript soll zunächst den Unterordner /files durchsuchen nach den CSV-Dateien und diese nach der Reihe "durcharbeiten" und danach löschen.
+
+z.B. WKS1-LAP02_-_a.koller_20250105_012747
+
+Dann soll aus dem CSV-Dateinamen folgendes ausgelesen werden: von hinten angefangen die Uhrzeit und das Datum (20250105_012747) dann kommt wieder ein Unterstrich (_) dann der Benutzername bis zu einem Unterstrich, Bindestrich und wieder Unterstrich (_-_) dann kommt der PC-Name.
+
+Als erstes soll mit diesen Daten die computer Tabelle durchsucht werden, ob es den Computer schon gibt oder er wird angelegt, falls es ihn noch nicht gibt.
+Dann das gleiche mit dem Benutzer in der user Tabelle: überprüfen ob es den Benutzer schon gibt oder ihn anlegen.
+
+Jetzt wird es etwas komplizierter: Es muss jetzt in der Tabelle software_scan nach der computer_id gesucht werden und der höchsten Nummer bei scan_version. Die scan_version Nummer wird um 1 erhöht (z.B. wenn davor 7 das höchste war, ist das nun die 8) (Falls es noch keinen Eintrag mit dem computer gibt, muss mit scan_version 0 angefangen werden). Dazu werden auch noch computer_id, user_id (also mit der IDs aus den jeweiligen Tabellen "computer" und "user") und dem Scandatum und -uhrzeit (scan_date), dass wir aus dem Dateinamen bekommen haben genutzt.
+
+Aus der CSV werden nun alle 4 Spalten ausgelesen und in die software Tabelle zusammen mit der scan_id eingetragen.
+
+
+Das Skript enthält folgende Hauptfunktionen:
+
+load_database_config(): Liest die Datenbankkonfiguration aus der INI-Datei
+parse_filename(): Extrahiert Informationen aus dem CSV-Dateinamen
+get_or_create_record(): Sucht oder erstellt Einträge in der computer/user Tabelle
+get_next_scan_version(): Ermittelt die nächste scan_version für einen Computer (oder 0 bei neuen)
+process_csv_file(): Verarbeitet eine einzelne CSV-Datei
+main(): Hauptfunktion, die alle CSV-Dateien im /files Ordner verarbeitet und die verschiedenen oben genannten Funktionen "ausführt"
 
 
 
