@@ -10,6 +10,36 @@ Um Überblick über die verschiedenen Einträge behalten zu können, sollte bei 
 
 Computername, Benutzername (unter welchem das Skript ausgeführt wurde) und das Datum inkl. Uhrzeit kann direkt aus dem CSV-Dateinamen ausgelesen werden:{computerName}_-_${userName}_$timeStamp.csv
 
+## Beschreibung des Codes / Funktionsweise
+Es soll eine Datenbank (softwareinventarisierung) geben.
+Mit einem Python Skript werden dann die CSV-Dateien in die Tabellen der Datenbank übertragen. (computer, user, software)
+
+Namensschema der SCV-Dateien: {computerName}-${userName}_$timeStamp.csv
+
+Hierdurch kann der Computername, Benutzername ausgelesen werden, der dann jeweils in die Tabellen eingetragen wird und über eine ID dann die Einträge in der "software" Tabelle mit dem jeweiligen PC und Benutzer verknüpft werden kann.
+
+Zusätzlich wird in der software Tabelle bei jeder eingetragenen CSV-Datei eine fortlaufende "Versionsnummer" für den PC (nicht für eine Kombination von User&PC oder User, nur PC) vergeben. Über diese kann später im PHP-Skript für das Webinterface eine History angezeigt werden und "schneller" die aktuellste Version und alle "dazugehörigen" Softwares "gefunden" werden.
+
+Das sind eigentlich nicht viele Schreibvorgänge, nur sehr viele Suchvorgänge...
+
+Beim Aufrufen der Seite wird eine Liste der Computer angezeigt. Beim Klicken auf einen der Computernamen, wird der neueste gemeldete Status (durch die vorhin angesprochenen Versionen) gesucht und in einer Tabelle angezeigt. Außerdem werden von dem Benutzer, der den neuesten Status hat, alle vorherigen Versionen und deren Datum herausgesucht und in einer Liste angezeigt, um "zurückspringen" zu können.
+Zusätzlich werden alle Benutzer die auf diesem Rechner angemeldet waren herausgesucht und in einem Dropdown angezeigt (um zwischen diesen Benutzern wechseln zu können, da bestimmte Software auch in Usermode installiert worden sein könnte und somit auf dem Rechner unterschiedliche Software bei unterschiedlichen Benutzern installiert sein kann).
+
+
+
+Also es kann pro PC mehrere Benutzer geben. 
+Das Skript läuft immer automatisch bei der Anmeldung der Benutzer.
+
+Also wenn auf PC_A der Benutzer_1 eine Liste schickt, dann soll dieser die Version 1 bekommen. Danach meldet er sich wieder an und bekommt die Version 2.
+Jetzt kommt Benutzer_2 und meldet sich auf PC_A an. Dieser bekommt die Version 3, da es ja egal ist, welcher Benutzer angemeldet wird, es ist nur der PC wichtig.... dieser bekommt bei jedem neuen Eintrag eine neue Version.
+
+--> in der Datenbank wird ein INDEX genutzt, da die Suche nach computer_id + Version die Hauptabfrage ist (INDEX idx_computer_version (computer_id, scan_version))
+
+
+
+
+
+
 ## Clients
 Die Clients sollen außerdem in Gruppen eingeteilt werden können.
 
