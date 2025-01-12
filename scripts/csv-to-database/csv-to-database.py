@@ -127,7 +127,8 @@ def main():
         
         # Verarbeite alle CSV-Dateien im /files Ordner
         files_dir = 'files'
-        for filename in os.listdir(files_dir):
+        files = sorted(os.listdir(files_dir))  # Sortiert die Dateiliste
+        for filename in files:
             if filename.endswith('.csv'):
                 file_path = os.path.join(files_dir, filename)
                 process_csv_file(connection, file_path)

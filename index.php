@@ -2,9 +2,6 @@
 // Konfiguration einbinden
 $config = require 'config.php';
 
-// GET-Parameter für scan_version
-$selectedVersion = isset($_GET['version']) ? (int)$_GET['version'] : null;
-
 // Datenbankverbindung herstellen
 try {
     $pdo = new PDO(
@@ -20,7 +17,7 @@ try {
 // Ausgewählter Computer und Benutzer und Version
 $selectedComputer = $_GET['computer'] ?? null;
 $selectedUser = $_GET['user'] ?? null;
-$selectedVersion = $_GET['version'] ?? null;
+$selectedVersion = isset($_GET['version']) ? (int)$_GET['version'] : null;
 
 // Computer-Typen und zugehörige Computer abrufen
 $stmt = $pdo->query("
@@ -71,10 +68,22 @@ if ($selectedComputer) {
     $stmt->execute([$selectedComputer]);
     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    // Versionen für alle Benutzer vorab laden
+    $userVersions = [];
+    foreach ($users as $user) {
+        $userVersions[$user['user_id']] = getLatestVersionForUser($pdo, $selectedComputer, $user['user_id']);
+    }
+
     // Wenn kein Benutzer ausgewählt ist, nehme den letzten aktiven
     if (!$selectedUser && $latestScan) {
         $selectedUser = $latestScan['user_id'];
     }
+}
+
+// Auswahl der Version für die Hervorhebung im Verlauf
+$versionForHighlight = $selectedVersion;
+if ($versionForHighlight === null && $latestScan) {
+    $versionForHighlight = $latestScan['scan_version'];
 }
 
 // Verlauf für ausgewählten Computer und Benutzer
@@ -92,42 +101,24 @@ if ($selectedComputer && $selectedUser) {
 
 // Installierte Software für den ausgewählten Computer, Benutzer und Version
 $software = [];
-$currentScanVersion = null;
 if ($selectedComputer && $selectedUser) {
-    // Wenn keine Version ausgewählt ist, nehme die neueste
-    if (!$selectedVersion) {
-        $stmt = $pdo->prepare("
-            SELECT scan_version 
-            FROM software_scan 
-            WHERE computer_id = ? AND user_id = ? 
-            ORDER BY scan_version DESC 
-            LIMIT 1
-        ");
-        $stmt->execute([$selectedComputer, $selectedUser]);
-        $selectedVersion = $stmt->fetchColumn();
+    // Wenn keine Version explizit ausgewählt wurde, nehmen wir die neueste
+    $versionToUse = $selectedVersion;
+    if ($versionToUse === null && $latestScan) {
+        $versionToUse = $latestScan['scan_version'];
     }
     
-    // Hole die scan_id für die ausgewählte Version
     $stmt = $pdo->prepare("
-        SELECT scan_id
-        FROM software_scan
-        WHERE computer_id = ? AND user_id = ? AND scan_version = ?
+        SELECT s.*
+        FROM software s
+        JOIN software_scan ss ON s.scan_id = ss.scan_id
+        WHERE ss.computer_id = ? 
+        AND ss.user_id = ?
+        AND ss.scan_version = ?
+        ORDER BY s.display_name
     ");
-    $stmt->execute([$selectedComputer, $selectedUser, $selectedVersion]);
-    $scanId = $stmt->fetchColumn();
-    
-    // Hole die Software für diese scan_id
-    if ($scanId) {
-        $stmt = $pdo->prepare("
-            SELECT s.*
-            FROM software s
-            WHERE s.scan_id = ?
-            ORDER BY s.display_name
-        ");
-        $stmt->execute([$scanId]);
-        $software = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
+    $stmt->execute([$selectedComputer, $selectedUser, $versionToUse]);
+    $software = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 // Computer-Name für den Header
@@ -137,6 +128,20 @@ if ($selectedComputer) {
     $stmt->execute([$selectedComputer]);
     $computerName = $stmt->fetchColumn();
 }
+
+// Funktion zum Ermitteln der neuesten Version für einen bestimmten Benutzer
+function getLatestVersionForUser($pdo, $computerId, $userId) {
+    $stmt = $pdo->prepare("
+        SELECT scan_version
+        FROM software_scan
+        WHERE computer_id = ? AND user_id = ?
+        ORDER BY scan_version DESC
+        LIMIT 1
+    ");
+    $stmt->execute([$computerId, $userId]);
+    return $stmt->fetchColumn();
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -145,6 +150,24 @@ if ($selectedComputer) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Softwareinventarisierung</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    // Benutzer-Versionen als JavaScript-Objekt
+    var userVersions = {
+        <?php
+        if (isset($users) && !empty($users)) {
+            foreach ($users as $user) {
+                $version = getLatestVersionForUser($pdo, $selectedComputer, $user['user_id']);
+                echo "{$user['user_id']}: {$version},";
+            }
+        }
+        ?>
+    };
+
+    function selectUser(userId) {
+        const version = userVersions[userId];
+        window.location.href = `?computer=<?= $selectedComputer ?>&user=${userId}&version=${version}`;
+    }
+    </script>
 </head>
 <body class="bg-gray-50">
     <div class="min-h-screen">
@@ -197,7 +220,7 @@ if ($selectedComputer) {
                     
                     <div class="mt-4">
                         <label class="block text-sm font-medium text-gray-700">Benutzer:</label>
-                        <select onchange="window.location.href='?computer=<?= $selectedComputer ?>&user=' + this.value"
+                        <select onchange="selectUser(this.value)" 
                                 class="mt-1 block w-64 rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200">
                             <?php foreach ($users as $user): ?>
                             <option value="<?= $user['user_id'] ?>" <?= $selectedUser == $user['user_id'] ? 'selected' : '' ?>>
@@ -243,8 +266,8 @@ if ($selectedComputer) {
                 <ul>
                     <?php foreach ($history as $entry): ?>
                     <li class="py-1">
-                        <a href="?computer=<?= $selectedComputer ?>&user=<?= $selectedUser ?>&version=<?= $entry['scan_version'] ?>" 
-                           class="block hover:bg-gray-100 rounded px-2 py-1 <?= $selectedVersion == $entry['scan_version'] ? 'bg-blue-100' : '' ?>">
+                        <a href="?computer=<?= $selectedComputer ?>&user=<?= $selectedUser ?>&version=<?= $entry['scan_version'] ?>"
+                        class="hover:text-blue-500 <?= $versionForHighlight == $entry['scan_version'] ? 'text-blue-500 font-semibold' : '' ?>">
                             <?= date('d.m.Y H:i', strtotime($entry['scan_date'])) ?> Uhr
                         </a>
                     </li>
