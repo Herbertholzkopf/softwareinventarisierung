@@ -2,6 +2,9 @@
 // Konfiguration einbinden
 $config = require 'config.php';
 
+// GET-Parameter für scan_version
+$selectedVersion = isset($_GET['version']) ? (int)$_GET['version'] : null;
+
 // Datenbankverbindung herstellen
 try {
     $pdo = new PDO(
@@ -14,9 +17,10 @@ try {
     die("Verbindungsfehler: " . $e->getMessage());
 }
 
-// Ausgewählter Computer und Benutzer
+// Ausgewählter Computer und Benutzer und Version
 $selectedComputer = $_GET['computer'] ?? null;
 $selectedUser = $_GET['user'] ?? null;
+$selectedVersion = $_GET['version'] ?? null;
 
 // Computer-Typen und zugehörige Computer abrufen
 $stmt = $pdo->query("
@@ -86,18 +90,44 @@ if ($selectedComputer && $selectedUser) {
     $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Installierte Software für den ausgewählten Computer und Benutzer
+// Installierte Software für den ausgewählten Computer, Benutzer und Version
 $software = [];
+$currentScanVersion = null;
 if ($selectedComputer && $selectedUser) {
+    // Wenn keine Version ausgewählt ist, nehme die neueste
+    if (!$selectedVersion) {
+        $stmt = $pdo->prepare("
+            SELECT scan_version 
+            FROM software_scan 
+            WHERE computer_id = ? AND user_id = ? 
+            ORDER BY scan_version DESC 
+            LIMIT 1
+        ");
+        $stmt->execute([$selectedComputer, $selectedUser]);
+        $selectedVersion = $stmt->fetchColumn();
+    }
+    
+    // Hole die scan_id für die ausgewählte Version
     $stmt = $pdo->prepare("
-        SELECT s.*
-        FROM software s
-        JOIN software_scan ss ON s.scan_id = ss.scan_id
-        WHERE ss.computer_id = ? AND ss.user_id = ?
-        ORDER BY s.display_name
+        SELECT scan_id
+        FROM software_scan
+        WHERE computer_id = ? AND user_id = ? AND scan_version = ?
     ");
-    $stmt->execute([$selectedComputer, $selectedUser]);
-    $software = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt->execute([$selectedComputer, $selectedUser, $selectedVersion]);
+    $scanId = $stmt->fetchColumn();
+    
+    // Hole die Software für diese scan_id
+    if ($scanId) {
+        $stmt = $pdo->prepare("
+            SELECT s.*
+            FROM software s
+            WHERE s.scan_id = ?
+            ORDER BY s.display_name
+        ");
+        $stmt->execute([$scanId]);
+        $software = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
 }
 
 // Computer-Name für den Header
@@ -213,7 +243,10 @@ if ($selectedComputer) {
                 <ul>
                     <?php foreach ($history as $entry): ?>
                     <li class="py-1">
-                        <?= date('d.m.Y H:i', strtotime($entry['scan_date'])) ?> Uhr
+                        <a href="?computer=<?= $selectedComputer ?>&user=<?= $selectedUser ?>&version=<?= $entry['scan_version'] ?>" 
+                           class="block hover:bg-gray-100 rounded px-2 py-1 <?= $selectedVersion == $entry['scan_version'] ? 'bg-blue-100' : '' ?>">
+                            <?= date('d.m.Y H:i', strtotime($entry['scan_date'])) ?> Uhr
+                        </a>
                     </li>
                     <?php endforeach; ?>
                 </ul>
