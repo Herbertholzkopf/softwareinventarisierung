@@ -35,7 +35,7 @@ apt-get install python3 python3-mysql.connector python3-pandas -y
 
 
 # Konfiguration von MySQL
-"${GREEN}Konfiguration der Datenbank wird gestartet...${NC}"
+echo -e "${GREEN}Konfiguration der Datenbank wird gestartet...${NC}"
 echo -e "${YELLOW}MySQL Root Passwort setzen...${NC}"
 read -s -p "Gewünschtes MySQL Root Passwort: " mysqlpass
 echo ""
