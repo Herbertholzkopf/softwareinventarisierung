@@ -88,10 +88,17 @@ def process_csv_file(connection, file_path):
         
         # Software-Einträge erstellen
         for _, row in df.iterrows():
-            # Konvertiere nan-Werte zu None für die Datenbankinserts
-            display_name = None if pd.isna(row['DisplayName']) else str(row['DisplayName'])
-            display_version = None if pd.isna(row['DisplayVersion']) else str(row['DisplayVersion'])
-            publisher = None if pd.isna(row['Publisher']) else str(row['Publisher'])
+            # Konvertiere nan-Werte zu None und kürze zu lange Werte
+            def truncate_value(value, max_length=255):
+                if pd.isna(value):
+                    return None
+                str_value = str(value)
+                return str_value[:max_length] if len(str_value) > max_length else str_value
+
+            # Alle Felder auf 255 Zeichen begrenzen
+            display_name = truncate_value(row['DisplayName'])
+            display_version = truncate_value(row['DisplayVersion'])
+            publisher = truncate_value(row['Publisher'])
             install_date = None if pd.isna(row['InstallDate']) else row['InstallDate']
             
             cursor.execute("""
