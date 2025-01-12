@@ -152,4 +152,4 @@ systemctl restart nginx
 
 echo -e "${GREEN}Installation abgeschlossen!${NC}"
 echo -e "${RED}Korrigiere das gerade eingegebene Passwort des Datenbank-Benutzers mit dem Befehl: nano /var/www/softwareinventarisierung/config.php${NC}"
-echo -e "${RED}Korrigiere das gerade eingegebene Passwort des Datenbank-Benutzers mit dem Befehl: nano /var/www/softwareinventarisierung/scripts/csv-database/database-config.ini${NC}"
+echo -e "${RED}Korrigiere das gerade eingegebene Passwort des Datenbank-Benutzers mit dem Befehl: nano /var/www/softwareinventarisierung/scripts/csv-to-database/database-config.ini${NC}"
