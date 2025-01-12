@@ -3,6 +3,7 @@ USE softwareinventar;
 CREATE TABLE computer (
     computer_id INT AUTO_INCREMENT PRIMARY KEY,
     computer_name VARCHAR(255) NOT NULL,
+    computer_type VARCHAR(20) NOT NULL DEFAULT 'Client' CHECK (calculation_time_span IN ('Client', 'Server')),
     UNIQUE KEY (computer_name)
 );
 
