@@ -128,9 +128,9 @@ if ($selectedComputer) {
             </div>
         </header>
 
-        <div class="flex">
+        <div class="flex max-w-screen-2xl mx-auto">
             <!-- Linke Spalte - Geräteliste -->
-            <div class="w-64 bg-white shadow-lg h-screen p-4">
+            <div class="w-80 bg-white shadow-lg h-screen p-4 flex-shrink-0">
                 <div class="mb-4">
                     <input type="text" placeholder="Suche..." class="w-full px-3 py-2 border rounded">
                 </div>
@@ -142,7 +142,7 @@ if ($selectedComputer) {
                         <?php foreach ($computersByType[$type] as $computer): ?>
                         <li>
                             <a href="?computer=<?= $computer['computer_id'] ?>" 
-                               class="block py-1 px-2 hover:bg-gray-100 rounded <?= $selectedComputer == $computer['computer_id'] ? 'bg-blue-100' : '' ?>">
+                               class="block py-1 px-2 hover:bg-gray-100 rounded whitespace-nowrap <?= $selectedComputer == $computer['computer_id'] ? 'bg-blue-100' : '' ?>">
                                 <?= htmlspecialchars($computer['computer_name']) ?>
                             </a>
                         </li>
@@ -208,7 +208,7 @@ if ($selectedComputer) {
 
             <!-- Rechte Spalte - Verlauf -->
             <?php if ($selectedComputer): ?>
-            <div class="w-64 bg-white shadow-lg p-4">
+            <div class="w-72 bg-white shadow-lg p-4 flex-shrink-0">
                 <h2 class="font-semibold mb-4">Verlauf</h2>
                 <ul>
                     <?php foreach ($history as $entry): ?>
