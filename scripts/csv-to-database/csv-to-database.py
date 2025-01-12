@@ -56,12 +56,7 @@ def get_next_scan_version(cursor, computer_id):
     """, (computer_id,))
     
     result = cursor.fetchone()[0]
-    # Wenn es noch keinen Eintrag gibt (result ist None), 
-    # beginnen wir mit Version 0
-    if result is None:
-        return 0
-    # Ansonsten erhöhen wir die höchste vorhandene Version um 1
-    return result + 1
+    return 0 if result is None else result + 1
 
 def process_csv_file(connection, file_path):
     """Verarbeitet eine einzelne CSV-Datei."""
@@ -93,15 +88,21 @@ def process_csv_file(connection, file_path):
         
         # Software-Einträge erstellen
         for _, row in df.iterrows():
+            # Konvertiere nan-Werte zu None für die Datenbankinserts
+            display_name = None if pd.isna(row['DisplayName']) else str(row['DisplayName'])
+            display_version = None if pd.isna(row['DisplayVersion']) else str(row['DisplayVersion'])
+            publisher = None if pd.isna(row['Publisher']) else str(row['Publisher'])
+            install_date = None if pd.isna(row['InstallDate']) else row['InstallDate']
+            
             cursor.execute("""
                 INSERT INTO software (scan_id, display_name, display_version, publisher, install_date)
                 VALUES (%s, %s, %s, %s, %s)
             """, (
                 scan_id,
-                row['DisplayName'],
-                row['DisplayVersion'],
-                row['Publisher'],
-                row['InstallDate'] if pd.notna(row['InstallDate']) else None
+                display_name,
+                display_version,
+                publisher,
+                install_date
             ))
         
         connection.commit()
@@ -113,7 +114,7 @@ def process_csv_file(connection, file_path):
     except Exception as e:
         connection.rollback()
         print(f"Fehler bei der Verarbeitung von {filename}: {str(e)}")
-        # Optional: Fehlerhafte Dateien in einen 'error' Ordner verschieben
+        # Fehlerhafte Dateien in einen 'error' Ordner verschieben
         error_dir = os.path.join(os.path.dirname(file_path), 'error')
         os.makedirs(error_dir, exist_ok=True)
         shutil.move(file_path, os.path.join(error_dir, filename))
@@ -127,7 +128,7 @@ def main():
         
         # Verarbeite alle CSV-Dateien im /files Ordner
         files_dir = 'files'
-        files = sorted(os.listdir(files_dir))  # Sortiert die Dateiliste
+        files = sorted(os.listdir(files_dir))
         for filename in files:
             if filename.endswith('.csv'):
                 file_path = os.path.join(files_dir, filename)
