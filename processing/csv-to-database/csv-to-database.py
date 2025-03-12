@@ -134,7 +134,7 @@ def main():
         connection = mysql.connector.connect(**db_config)
         
         # Verarbeite alle CSV-Dateien im /files Ordner
-        files_dir = 'files'
+        files_dir = 'test-files'
         files = sorted(os.listdir(files_dir))
         for filename in files:
             if filename.endswith('.csv'):
