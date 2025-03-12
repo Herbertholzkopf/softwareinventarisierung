@@ -40,12 +40,11 @@ CREATE TABLE software_scan (
 )
 
 -- Speichert die alten Softwarestände der Rechner
--- Dabei wird die ID des Computers, die ID des Benutzers, die ID des Scans, das Datum des Scans, das Datum der "Archvierung" und die Liste der Software gespeichert
+-- Dabei wird die ID des Computers, die ID des Benutzers, das Datum des Scans, das Datum der "Archvierung" und die Liste der Software gespeichert
 CREATE TABLE software_scan_archive (
     software_scan_id INT AUTO_INCREMENT PRIMARY KEY,
     computer_id INT NOT NULL,
     user_id INT NOT NULL,
-    scan_id INT NOT NULL, -- fortlaufende Nummer für einen Benutzer AND Computer
     scan_date TIMESTAMP NOT NULL,
     archive_date TIMESTAMP NOT NULL, -- Wann wurde der Scan archiviert
     software_data JSON,
