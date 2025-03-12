@@ -1,3 +1,11 @@
+CREATE DATABASE IF NOT EXISTS softwareinventar CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'softwareinventar_user'@'localhost' IDENTIFIED BY '12345678';
+GRANT ALL PRIVILEGES ON softwareinventar.* TO 'softwareinventar_user'@'localhost';
+FLUSH PRIVILEGES;
+
+
+
+
 USE softwareinventar;
 
 -- Ein Scan der Software wird bei einer Anmeldung eines Benutezrs auf einem Client durchgeführt
@@ -37,7 +45,7 @@ CREATE TABLE software_scan (
     software_data JSON,
     FOREIGN KEY (computer_id) REFERENCES computer(computer_id),
     FOREIGN KEY (user_id) REFERENCES user(user_id)
-)
+);
 
 -- Speichert die alten Softwarestände der Rechner
 -- Dabei wird die ID des Computers, die ID des Benutzers, das Datum des Scans, das Datum der "Archvierung" und die Liste der Software gespeichert
