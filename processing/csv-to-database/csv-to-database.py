@@ -4,7 +4,7 @@ import re
 import json
 import csv
 import sys
-import mysql.connector
+import pymysql
 from datetime import datetime
 import importlib.util
 
@@ -30,15 +30,17 @@ def load_db_config():
 # Verbindung zur Datenbank herstellen
 def connect_to_database(config):
     try:
-        conn = mysql.connector.connect(
+        conn = pymysql.connect(
             host=config['host'],
             user=config['user'],
             password=config['password'],
             database=config['database'],
-            use_pure=True  # Stellt sicher, dass keine SSL/TLS-Verbindung verwendet wird
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor,
+            ssl=None  # Stellt sicher, dass keine SSL/TLS-Verbindung verwendet wird
         )
         return conn
-    except mysql.connector.Error as e:
+    except pymysql.Error as e:
         print(f"Fehler bei der Verbindung zur MySQL-Datenbank: {e}")
         sys.exit(1)
 
@@ -77,7 +79,7 @@ def get_sorted_csv_files(directory):
 
 # Benutzer in der Datenbank abrufen oder erstellen
 def get_or_create_user(conn, username):
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     
     # Vorhandenen Benutzer suchen
     cursor.execute("SELECT user_id FROM user WHERE username = %s", (username,))
@@ -91,13 +93,14 @@ def get_or_create_user(conn, username):
     cursor.execute("INSERT INTO user (username) VALUES (%s)", (username,))
     conn.commit()
     
+    # Bei PyMySQL letzte eingefügte ID abrufen
     user_id = cursor.lastrowid
     cursor.close()
     return user_id
 
 # Computer in der Datenbank abrufen oder erstellen
 def get_or_create_computer(conn, computer_name):
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     
     # Vorhandenen Computer suchen
     cursor.execute("SELECT computer_id FROM computer WHERE computer_name = %s", (computer_name,))
@@ -117,7 +120,7 @@ def get_or_create_computer(conn, computer_name):
 
 # Bestehende Scan-Daten für eine Computer-Benutzer-Kombination abrufen
 def get_existing_scan(conn, computer_id, user_id):
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     
     cursor.execute(
         "SELECT software_scan_id, scan_date, software_data FROM software_scan WHERE computer_id = %s AND user_id = %s",
@@ -198,13 +201,13 @@ def parse_csv_content(csv_file_path):
     return json.dumps(software_list)
 
 # Eine einzelne CSV-Datei verarbeiten
-def process_csv_file(conn, file_info):
+def process_csv_file(conn, file_info, csv_dir):
     computer_name = file_info['computer_name']
     username = file_info['username']
     scan_date = file_info['scan_date']
     filename = file_info['raw_filename']
     
-    file_path = os.path.join(os.getcwd(), filename)
+    file_path = os.path.join(csv_dir, filename)
     
     if not os.path.exists(file_path):
         print(f"Datei {filename} nicht gefunden.")
@@ -242,6 +245,51 @@ def process_csv_file(conn, file_info):
         # Neuen Scan-Datensatz erstellen
         create_scan(conn, computer_id, user_id, scan_date, software_data_json)
         print(f"Neuer Scan für {computer_name} - {username} erstellt")
+    
+    # CSV-Datei nach der Verarbeitung löschen
+    try:
+        os.remove(file_path)
+        print(f"Datei {filename} wurde nach Verarbeitung gelöscht.")
+    except Exception as e:
+        print(f"Fehler beim Löschen der Datei {filename}: {e}")
+    
+    # Benutzer- und Computer-Datensätze abrufen oder erstellen
+    user_id = get_or_create_user(conn, username)
+    computer_id = get_or_create_computer(conn, computer_name)
+    
+    # CSV-Inhalt zu JSON parsen
+    software_data_json = parse_csv_content(file_path)
+    
+    # Prüfen, ob diese Computer-Benutzer-Kombination bereits existiert
+    existing_scan = get_existing_scan(conn, computer_id, user_id)
+    
+    if existing_scan:
+        # Software-Daten vergleichen
+        if is_software_data_different(existing_scan['software_data'], software_data_json):
+            # Archivierungsdatum erstellen (eine Sekunde vor dem neuen Scan-Datum)
+            archive_date_obj = datetime.strptime(scan_date, '%Y-%m-%d %H:%M:%S')
+            archive_date_obj = archive_date_obj.replace(second=max(0, archive_date_obj.second - 1))
+            archive_date = archive_date_obj.strftime('%Y-%m-%d %H:%M:%S')
+            
+            # Aktuelle Daten archivieren
+            archive_scan(conn, existing_scan, archive_date)
+            
+            # Scan mit neuen Daten aktualisieren
+            update_scan(conn, existing_scan['software_scan_id'], scan_date, software_data_json)
+            print(f"Scan für {computer_name} - {username} aktualisiert")
+        else:
+            print(f"Keine Änderungen für {computer_name} - {username}")
+    else:
+        # Neuen Scan-Datensatz erstellen
+        create_scan(conn, computer_id, user_id, scan_date, software_data_json)
+        print(f"Neuer Scan für {computer_name} - {username} erstellt")
+    
+    # CSV-Datei nach der Verarbeitung löschen
+    try:
+        os.remove(file_path)
+        print(f"Datei {filename} wurde nach Verarbeitung gelöscht.")
+    except Exception as e:
+        print(f"Fehler beim Löschen der Datei {filename}: {e}")
 
 # Hauptfunktion
 def main():
@@ -251,21 +299,90 @@ def main():
     # Mit Datenbank verbinden
     conn = connect_to_database(db_config)
     
-    # Sortierte CSV-Dateien abrufen
-    directory = os.getcwd()  # Aktuelles Verzeichnis
-    csv_files = get_sorted_csv_files(directory)
+    # Pfad zum Verzeichnis mit den CSV-Dateien
+    csv_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test-files')
     
-    print(f"{len(csv_files)} CSV-Dateien zur Verarbeitung gefunden.")
+    # Prüfen, ob das Verzeichnis existiert
+    if not os.path.exists(csv_dir):
+        print(f"Verzeichnis {csv_dir} nicht gefunden. Bitte stellen Sie sicher, dass das Verzeichnis existiert.")
+        return
     
-    # Jede Datei verarbeiten
-    for file_info in csv_files:
+    # Verarbeitungszähler
+    processed_count = 0
+    
+    # Dateien solange verarbeiten, bis keine mehr übrig sind
+    while True:
+        # Aktuelle Liste der CSV-Dateien abrufen
+        csv_files = get_sorted_csv_files(csv_dir)
+        
+        if not csv_files:
+            print("Keine weiteren CSV-Dateien zur Verarbeitung gefunden.")
+            break
+        
+        # Nur die älteste Datei verarbeiten
+        file_info = csv_files[0]
+        computer_name = file_info['computer_name']
+        username = file_info['username']
+        scan_date = file_info['scan_date']
+        filename = file_info['raw_filename']
+        
+        file_path = os.path.join(csv_dir, filename)
+        
+        # Prüfen, ob die Datei existiert
+        if not os.path.exists(file_path):
+            print(f"Datei {filename} nicht gefunden, überspringe...")
+            continue
+        
+        print(f"Verarbeite Datei: {filename}")
+        
         try:
-            process_csv_file(conn, file_info)
+            # Benutzer- und Computer-Datensätze abrufen oder erstellen
+            user_id = get_or_create_user(conn, username)
+            computer_id = get_or_create_computer(conn, computer_name)
+            
+            # CSV-Inhalt zu JSON parsen
+            software_data_json = parse_csv_content(file_path)
+            
+            # Prüfen, ob diese Computer-Benutzer-Kombination bereits existiert
+            existing_scan = get_existing_scan(conn, computer_id, user_id)
+            
+            if existing_scan:
+                # Software-Daten vergleichen
+                if is_software_data_different(existing_scan['software_data'], software_data_json):
+                    # Archivierungsdatum erstellen (eine Sekunde vor dem neuen Scan-Datum)
+                    archive_date_obj = datetime.strptime(scan_date, '%Y-%m-%d %H:%M:%S')
+                    archive_date_obj = archive_date_obj.replace(second=max(0, archive_date_obj.second - 1))
+                    archive_date = archive_date_obj.strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    # Aktuelle Daten archivieren
+                    archive_scan(conn, existing_scan, archive_date)
+                    
+                    # Scan mit neuen Daten aktualisieren
+                    update_scan(conn, existing_scan['software_scan_id'], scan_date, software_data_json)
+                    print(f"Scan für {computer_name} - {username} aktualisiert")
+                else:
+                    print(f"Keine Änderungen für {computer_name} - {username}")
+            else:
+                # Neuen Scan-Datensatz erstellen
+                create_scan(conn, computer_id, user_id, scan_date, software_data_json)
+                print(f"Neuer Scan für {computer_name} - {username} erstellt")
+            
+            # CSV-Datei nach der Verarbeitung löschen
+            os.remove(file_path)
+            print(f"Datei {filename} wurde nach Verarbeitung gelöscht.")
+            
+            # Erfolgreiche Verarbeitung zählen
+            processed_count += 1
+            
         except Exception as e:
-            print(f"Fehler bei der Verarbeitung der Datei {file_info['raw_filename']}: {e}")
+            print(f"Fehler bei der Verarbeitung der Datei {filename}: {e}")
     
     # Datenbankverbindung schließen
     conn.close()
+    
+    if processed_count > 0:
+        print(f"{processed_count} CSV-Dateien wurden erfolgreich verarbeitet.")
+    
     print("Verarbeitung abgeschlossen.")
 
 if __name__ == "__main__":
