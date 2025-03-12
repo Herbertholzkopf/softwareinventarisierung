@@ -1,153 +1,272 @@
+#!/usr/bin/env python3
 import os
 import re
+import json
+import csv
+import sys
 import mysql.connector
-from mysql.connector import Error
-import configparser
 from datetime import datetime
-import pandas as pd
-import shutil
+import importlib.util
 
-def load_database_config(config_file='database-config.ini'):
-    """Lädt die Datenbank-Konfiguration aus der INI-Datei."""
-    config = configparser.ConfigParser()
-    config.read(config_file)
-    
-    return {
-        'host': config['database']['host'],
-        'user': config['database']['user'],
-        'password': config['database']['password'],
-        'database': config['database']['database'],
-        'ssl_disabled': config['database'].getboolean('ssl_disabled')
-    }
+# Datenbank-Konfiguration aus ../config/database.py laden
+def load_db_config():
+    try:
+        # Pfad zur Konfigurationsdatei
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'database.py')
+        spec = importlib.util.spec_from_file_location("database", config_path)
+        database = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(database)
+        
+        return {
+            'host': database.DB_HOST,
+            'user': database.DB_USER,
+            'password': database.DB_PASSWORD,
+            'database': database.DB_NAME
+        }
+    except Exception as e:
+        print(f"Fehler beim Laden der Datenbank-Konfiguration: {e}")
+        sys.exit(1)
 
+# Verbindung zur Datenbank herstellen
+def connect_to_database(config):
+    try:
+        conn = mysql.connector.connect(
+            host=config['host'],
+            user=config['user'],
+            password=config['password'],
+            database=config['database'],
+            use_pure=True  # Stellt sicher, dass keine SSL/TLS-Verbindung verwendet wird
+        )
+        return conn
+    except mysql.connector.Error as e:
+        print(f"Fehler bei der Verbindung zur MySQL-Datenbank: {e}")
+        sys.exit(1)
+
+# Informationen aus dem Dateinamen extrahieren (Rechnername, Benutzername, Datum)
 def parse_filename(filename):
-    """Extrahiert Informationen aus dem Dateinamen."""
-    # Beispiel: WKS1LAP02__a.koller_20250105_012747.csv
     pattern = r'(.+?)_-_(.+?)_(\d{8}_\d{6})\.csv$'
     match = re.match(pattern, filename)
     
-    if not match:
-        raise ValueError(f"Ungültiges Dateiformat: {filename}")
-    
-    computer_name, username, timestamp = match.groups()
-    scan_datetime = datetime.strptime(timestamp, '%Y%m%d_%H%M%S')
-    
-    return computer_name, username, scan_datetime
+    if match:
+        computer_name, username, date_time = match.groups()
+        # Konvertierung des Datumsformats in MySQL-Timestamp-Format
+        date_obj = datetime.strptime(date_time, '%Y%m%d_%H%M%S')
+        scan_date = date_obj.strftime('%Y-%m-%d %H:%M:%S')
+        
+        return {
+            'computer_name': computer_name,
+            'username': username,
+            'scan_date': scan_date,
+            'date_time_str': date_time,
+            'raw_filename': filename
+        }
+    return None
 
-def get_or_create_record(cursor, table, search_column, search_value):
-    """Sucht einen Datensatz oder erstellt ihn, wenn er nicht existiert."""
-    # Suche nach existierendem Eintrag
-    cursor.execute(f"SELECT {table}_id FROM {table} WHERE {search_column} = %s", (search_value,))
-    result = cursor.fetchone()
+# CSV-Dateien nach Datum sortiert abrufen (älteste zuerst)
+def get_sorted_csv_files(directory):
+    csv_files = []
     
-    if result:
-        return result[0]
+    for filename in os.listdir(directory):
+        if filename.endswith('.csv'):
+            file_info = parse_filename(filename)
+            if file_info:
+                csv_files.append(file_info)
     
-    # Erstelle neuen Eintrag
-    cursor.execute(f"INSERT INTO {table} ({search_column}) VALUES (%s)", (search_value,))
-    return cursor.lastrowid
+    # Nach date_time_str sortieren (im Format YYYYMMDD_HHMMSS)
+    return sorted(csv_files, key=lambda x: x['date_time_str'])
 
-def get_next_scan_version(cursor, computer_id):
-    """Ermittelt die nächste scan_version für einen Computer."""
-    cursor.execute("""
-        SELECT MAX(scan_version) 
-        FROM software_scan 
-        WHERE computer_id = %s
-    """, (computer_id,))
+# Benutzer in der Datenbank abrufen oder erstellen
+def get_or_create_user(conn, username):
+    cursor = conn.cursor(dictionary=True)
     
-    result = cursor.fetchone()[0]
-    return 0 if result is None else result + 1
+    # Vorhandenen Benutzer suchen
+    cursor.execute("SELECT user_id FROM user WHERE username = %s", (username,))
+    user = cursor.fetchone()
+    
+    if user:
+        cursor.close()
+        return user['user_id']
+    
+    # Neuen Benutzer erstellen
+    cursor.execute("INSERT INTO user (username) VALUES (%s)", (username,))
+    conn.commit()
+    
+    user_id = cursor.lastrowid
+    cursor.close()
+    return user_id
 
-def process_csv_file(connection, file_path):
-    """Verarbeitet eine einzelne CSV-Datei."""
-    try:
-        # Dateinamen parsen
-        filename = os.path.basename(file_path)
-        computer_name, username, scan_datetime = parse_filename(filename)
-        
-        cursor = connection.cursor()
-        
-        # Computer und User IDs ermitteln/erstellen
-        computer_id = get_or_create_record(cursor, 'computer', 'computer_name', computer_name)
-        user_id = get_or_create_record(cursor, 'user', 'username', username)
-        
-        # Nächste scan_version ermitteln
-        scan_version = get_next_scan_version(cursor, computer_id)
-        
-        # Neuen Scan-Eintrag erstellen
-        cursor.execute("""
-            INSERT INTO software_scan (computer_id, user_id, scan_version, scan_date)
-            VALUES (%s, %s, %s, %s)
-        """, (computer_id, user_id, scan_version, scan_datetime))
-        
-        scan_id = cursor.lastrowid
-        
-        # CSV-Daten einlesen und verarbeiten
-        df = pd.read_csv(file_path, encoding='utf-8')
-        df = df.dropna(how='all')  # Leere Zeilen überspringen
-        
-        # Software-Einträge erstellen
-        for _, row in df.iterrows():
-            # Konvertiere nan-Werte zu None und kürze zu lange Werte
-            def truncate_value(value, max_length=255):
-                if pd.isna(value):
-                    return None
-                str_value = str(value)
-                return str_value[:max_length] if len(str_value) > max_length else str_value
+# Computer in der Datenbank abrufen oder erstellen
+def get_or_create_computer(conn, computer_name):
+    cursor = conn.cursor(dictionary=True)
+    
+    # Vorhandenen Computer suchen
+    cursor.execute("SELECT computer_id FROM computer WHERE computer_name = %s", (computer_name,))
+    computer = cursor.fetchone()
+    
+    if computer:
+        cursor.close()
+        return computer['computer_id']
+    
+    # Neuen Computer erstellen (Standardtyp ist 'Client')
+    cursor.execute("INSERT INTO computer (computer_name) VALUES (%s)", (computer_name,))
+    conn.commit()
+    
+    computer_id = cursor.lastrowid
+    cursor.close()
+    return computer_id
 
-            # Alle Felder auf 255 Zeichen begrenzen
-            display_name = truncate_value(row['DisplayName'])
-            display_version = truncate_value(row['DisplayVersion'])
-            publisher = truncate_value(row['Publisher'])
-            install_date = None if pd.isna(row['InstallDate']) else row['InstallDate']
+# Bestehende Scan-Daten für eine Computer-Benutzer-Kombination abrufen
+def get_existing_scan(conn, computer_id, user_id):
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute(
+        "SELECT software_scan_id, scan_date, software_data FROM software_scan WHERE computer_id = %s AND user_id = %s",
+        (computer_id, user_id)
+    )
+    
+    scan = cursor.fetchone()
+    cursor.close()
+    return scan
+
+# Vergleich von Software-Daten (JSON-Strings)
+def is_software_data_different(existing_json_str, new_json_str):
+    # JSON-Strings in Python-Objekte umwandeln für einen korrekten Vergleich
+    existing_data = json.loads(existing_json_str)
+    new_data = json.loads(new_json_str)
+    
+    # Beide Listen sortieren, um einen konsistenten Vergleich zu gewährleisten
+    existing_data.sort(key=lambda x: x.get('displayName', ''))
+    new_data.sort(key=lambda x: x.get('displayName', ''))
+    
+    return existing_data != new_data
+
+# Bestehenden Scan in die Archiv-Tabelle verschieben
+def archive_scan(conn, scan, archive_date):
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "INSERT INTO software_scan_archive (computer_id, user_id, scan_date, archive_date, software_data) "
+        "SELECT computer_id, user_id, scan_date, %s, software_data FROM software_scan WHERE software_scan_id = %s",
+        (archive_date, scan['software_scan_id'])
+    )
+    
+    conn.commit()
+    cursor.close()
+
+# Bestehenden Scan mit neuen Daten aktualisieren
+def update_scan(conn, scan_id, scan_date, software_data):
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "UPDATE software_scan SET scan_date = %s, software_data = %s WHERE software_scan_id = %s",
+        (scan_date, software_data, scan_id)
+    )
+    
+    conn.commit()
+    cursor.close()
+
+# Neuen Scan-Datensatz erstellen
+def create_scan(conn, computer_id, user_id, scan_date, software_data):
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "INSERT INTO software_scan (computer_id, user_id, scan_date, software_data) VALUES (%s, %s, %s, %s)",
+        (computer_id, user_id, scan_date, software_data)
+    )
+    
+    conn.commit()
+    cursor.close()
+
+# CSV-Datei parsen und Software-Daten als JSON-String zurückgeben
+def parse_csv_content(csv_file_path):
+    software_list = []
+    
+    with open(csv_file_path, 'r', encoding='utf-8') as csv_file:
+        csv_reader = csv.reader(csv_file)
+        for row in csv_reader:
+            # Prüfen, ob mindestens die ersten drei Elemente vorhanden sind
+            if len(row) >= 3:
+                software_info = {
+                    "displayName": row[0],
+                    "displayVersion": row[1],
+                    "publisher": row[2],
+                    # Optionales Installationsdatum behandeln (kann leer sein)
+                    "installDate": row[3] if len(row) > 3 and row[3] else None
+                }
+                software_list.append(software_info)
+    
+    return json.dumps(software_list)
+
+# Eine einzelne CSV-Datei verarbeiten
+def process_csv_file(conn, file_info):
+    computer_name = file_info['computer_name']
+    username = file_info['username']
+    scan_date = file_info['scan_date']
+    filename = file_info['raw_filename']
+    
+    file_path = os.path.join(os.getcwd(), filename)
+    
+    if not os.path.exists(file_path):
+        print(f"Datei {filename} nicht gefunden.")
+        return
+    
+    print(f"Verarbeite Datei: {filename}")
+    
+    # Benutzer- und Computer-Datensätze abrufen oder erstellen
+    user_id = get_or_create_user(conn, username)
+    computer_id = get_or_create_computer(conn, computer_name)
+    
+    # CSV-Inhalt zu JSON parsen
+    software_data_json = parse_csv_content(file_path)
+    
+    # Prüfen, ob diese Computer-Benutzer-Kombination bereits existiert
+    existing_scan = get_existing_scan(conn, computer_id, user_id)
+    
+    if existing_scan:
+        # Software-Daten vergleichen
+        if is_software_data_different(existing_scan['software_data'], software_data_json):
+            # Archivierungsdatum erstellen (eine Sekunde vor dem neuen Scan-Datum)
+            archive_date_obj = datetime.strptime(scan_date, '%Y-%m-%d %H:%M:%S')
+            archive_date_obj = archive_date_obj.replace(second=max(0, archive_date_obj.second - 1))
+            archive_date = archive_date_obj.strftime('%Y-%m-%d %H:%M:%S')
             
-            cursor.execute("""
-                INSERT INTO software (scan_id, display_name, display_version, publisher, install_date)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (
-                scan_id,
-                display_name,
-                display_version,
-                publisher,
-                install_date
-            ))
-        
-        connection.commit()
-        print(f"Erfolgreich verarbeitet: {filename}")
-        
-        # Datei nach erfolgreicher Verarbeitung löschen
-        os.remove(file_path)
-        
-    except Exception as e:
-        connection.rollback()
-        print(f"Fehler bei der Verarbeitung von {filename}: {str(e)}")
-        # Fehlerhafte Dateien in einen 'error' Ordner verschieben
-        error_dir = os.path.join(os.path.dirname(file_path), 'error')
-        os.makedirs(error_dir, exist_ok=True)
-        shutil.move(file_path, os.path.join(error_dir, filename))
+            # Aktuelle Daten archivieren
+            archive_scan(conn, existing_scan, archive_date)
+            
+            # Scan mit neuen Daten aktualisieren
+            update_scan(conn, existing_scan['software_scan_id'], scan_date, software_data_json)
+            print(f"Scan für {computer_name} - {username} aktualisiert")
+        else:
+            print(f"Keine Änderungen für {computer_name} - {username}")
+    else:
+        # Neuen Scan-Datensatz erstellen
+        create_scan(conn, computer_id, user_id, scan_date, software_data_json)
+        print(f"Neuer Scan für {computer_name} - {username} erstellt")
 
+# Hauptfunktion
 def main():
-    """Hauptfunktion des Skripts."""
-    try:
-        # Datenbankverbindung herstellen
-        db_config = load_database_config()
-        connection = mysql.connector.connect(**db_config)
-        
-        # Verarbeite alle CSV-Dateien im /files Ordner
-        files_dir = 'test-files'
-        files = sorted(os.listdir(files_dir))
-        for filename in files:
-            if filename.endswith('.csv'):
-                file_path = os.path.join(files_dir, filename)
-                process_csv_file(connection, file_path)
-        
-    except Error as e:
-        print(f"Datenbankfehler: {str(e)}")
-    except Exception as e:
-        print(f"Allgemeiner Fehler: {str(e)}")
-    finally:
-        if 'connection' in locals() and connection.is_connected():
-            connection.close()
+    # Datenbank-Konfiguration laden
+    db_config = load_db_config()
+    
+    # Mit Datenbank verbinden
+    conn = connect_to_database(db_config)
+    
+    # Sortierte CSV-Dateien abrufen
+    directory = os.getcwd()  # Aktuelles Verzeichnis
+    csv_files = get_sorted_csv_files(directory)
+    
+    print(f"{len(csv_files)} CSV-Dateien zur Verarbeitung gefunden.")
+    
+    # Jede Datei verarbeiten
+    for file_info in csv_files:
+        try:
+            process_csv_file(conn, file_info)
+        except Exception as e:
+            print(f"Fehler bei der Verarbeitung der Datei {file_info['raw_filename']}: {e}")
+    
+    # Datenbankverbindung schließen
+    conn.close()
+    print("Verarbeitung abgeschlossen.")
 
 if __name__ == "__main__":
     main()
