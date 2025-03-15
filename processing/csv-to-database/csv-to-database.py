@@ -252,44 +252,31 @@ def process_csv_file(conn, file_info, csv_dir):
         print(f"Datei {filename} wurde nach Verarbeitung gelöscht.")
     except Exception as e:
         print(f"Fehler beim Löschen der Datei {filename}: {e}")
+
+# Funktion zum Schreiben der Log-Datei
+def write_log_file(processed_count, added_count, archived_count, skipped_count):
+    # Aktuelles Datum und Uhrzeit erhalten
+    current_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # Benutzer- und Computer-Datensätze abrufen oder erstellen
-    user_id = get_or_create_user(conn, username)
-    computer_id = get_or_create_computer(conn, computer_name)
+    # Pfad zur Log-Datei
+    log_dir = os.path.dirname(os.path.abspath(__file__))
+    log_file_path = os.path.join(log_dir, 'csv_import.log')
     
-    # CSV-Inhalt zu JSON parsen
-    software_data_json = parse_csv_content(file_path)
+    # Log-Inhalt erstellen
+    log_content = (
+        "-----------------------------------\n"
+        f"{current_datetime}\n"
+        f"{processed_count} Dateien verarbeitet:\n"
+        f"{added_count} Einträge hinzugefügt\n"
+        f"{archived_count} Einträge archiviert\n"
+        f"{skipped_count} Einträge übersprungen (gleicher Softwarestand bereits vorhanden)\n\n"
+    )
     
-    # Prüfen, ob diese Computer-Benutzer-Kombination bereits existiert
-    existing_scan = get_existing_scan(conn, computer_id, user_id)
+    # Log-Datei im Append-Modus öffnen oder erstellen
+    with open(log_file_path, 'a', encoding='utf-8') as log_file:
+        log_file.write(log_content)
     
-    if existing_scan:
-        # Software-Daten vergleichen
-        if is_software_data_different(existing_scan['software_data'], software_data_json):
-            # Archivierungsdatum erstellen (eine Sekunde vor dem neuen Scan-Datum)
-            archive_date_obj = datetime.strptime(scan_date, '%Y-%m-%d %H:%M:%S')
-            archive_date_obj = archive_date_obj.replace(second=max(0, archive_date_obj.second - 1))
-            archive_date = archive_date_obj.strftime('%Y-%m-%d %H:%M:%S')
-            
-            # Aktuelle Daten archivieren
-            archive_scan(conn, existing_scan, archive_date)
-            
-            # Scan mit neuen Daten aktualisieren
-            update_scan(conn, existing_scan['software_scan_id'], scan_date, software_data_json)
-            print(f"Scan für {computer_name} - {username} aktualisiert")
-        else:
-            print(f"Keine Änderungen für {computer_name} - {username}")
-    else:
-        # Neuen Scan-Datensatz erstellen
-        create_scan(conn, computer_id, user_id, scan_date, software_data_json)
-        print(f"Neuer Scan für {computer_name} - {username} erstellt")
-    
-    # CSV-Datei nach der Verarbeitung löschen
-    try:
-        os.remove(file_path)
-        print(f"Datei {filename} wurde nach Verarbeitung gelöscht.")
-    except Exception as e:
-        print(f"Fehler beim Löschen der Datei {filename}: {e}")
+    print(f"Log-Datei wurde unter {log_file_path} aktualisiert.")
 
 # Hauptfunktion
 def main():
@@ -309,6 +296,9 @@ def main():
     
     # Verarbeitungszähler
     processed_count = 0
+    added_count = 0      # Neu hinzugefügt
+    archived_count = 0   # Neu hinzugefügt
+    skipped_count = 0    # Neu hinzugefügt
     
     # Dateien solange verarbeiten, bis keine mehr übrig sind
     while True:
@@ -360,12 +350,21 @@ def main():
                     # Scan mit neuen Daten aktualisieren
                     update_scan(conn, existing_scan['software_scan_id'], scan_date, software_data_json)
                     print(f"Scan für {computer_name} - {username} aktualisiert")
+                    
+                    # Zähler für archivierte Einträge erhöhen
+                    archived_count += 1
                 else:
                     print(f"Keine Änderungen für {computer_name} - {username}")
+                    
+                    # Zähler für übersprungene Einträge erhöhen
+                    skipped_count += 1
             else:
                 # Neuen Scan-Datensatz erstellen
                 create_scan(conn, computer_id, user_id, scan_date, software_data_json)
                 print(f"Neuer Scan für {computer_name} - {username} erstellt")
+                
+                # Zähler für hinzugefügte Einträge erhöhen
+                added_count += 1
             
             # CSV-Datei nach der Verarbeitung löschen
             os.remove(file_path)
@@ -379,6 +378,9 @@ def main():
     
     # Datenbankverbindung schließen
     conn.close()
+    
+    # Log-Datei schreiben
+    write_log_file(processed_count, added_count, archived_count, skipped_count)
     
     if processed_count > 0:
         print(f"{processed_count} CSV-Dateien wurden erfolgreich verarbeitet.")
